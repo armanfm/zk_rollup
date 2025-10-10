@@ -9,11 +9,14 @@ use std::fs::File;
 use std::io::{Read, BufWriter, Write};
 use rand_core::OsRng;
 
-/// Circuito de Verificação de Prova Externa
+/// -------------------------------
+/// Circuito que representa a verificação de uma prova externa
+/// -------------------------------
 #[derive(Clone)]
 pub struct VerifierCircuit {
     pub proof_bytes: Vec<u8>,
     pub public_input: Fr,
+    pub vk: VerifyingKey<EpAffine>,
 }
 
 impl Circuit<Fr> for VerifierCircuit {
@@ -21,7 +24,7 @@ impl Circuit<Fr> for VerifierCircuit {
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
-        Self { proof_bytes: vec![], public_input: Fr::zero() }
+        Self { proof_bytes: vec![], public_input: Fr::zero(), vk: self.vk.clone() }
     }
 
     fn configure(_meta: &mut ConstraintSystem<Fr>) -> Self::Config { () }
@@ -31,15 +34,21 @@ impl Circuit<Fr> for VerifierCircuit {
         _config: Self::Config,
         mut layouter: impl Layouter<Fr>,
     ) -> Result<(), Error> {
-        layouter.assign_region(|| "verifier dummy", |mut region| {
-            println!("🔹 Verificando prova interna: {:?}", self.public_input);
-            let _ = Value::known(self.public_input);
+        layouter.assign_region(|| "verifier region", |mut region| {
+            // 🔹 Aqui vai o gadget que realmente verifica a prova
+            println!("🔹 Verificando prova externa com input {:?}", self.public_input);
+
+            // Placeholder: células que representam a verificação
+            let _assigned_input = Value::known(self.public_input);
+
             Ok(())
         })
     }
 }
 
-/// Circuito Agregador Recursivo
+/// -------------------------------
+/// Circuito agregador que valida várias provas externas
+/// -------------------------------
 #[derive(Clone)]
 pub struct AggregatorCircuit {
     pub subcircuits: Vec<VerifierCircuit>,
@@ -63,13 +72,17 @@ impl Circuit<Fr> for AggregatorCircuit {
         layouter.assign_region(|| "aggregate recursion", |mut region| {
             for (i, sub) in self.subcircuits.iter().enumerate() {
                 println!("🔹 Aggregando subcircuito {} com input {:?}", i, sub.public_input);
-                let _ = Value::known(sub.public_input);
+                // Placeholder: aqui você usaria o gadget de verificação de prova real
+                let _verified = Value::known(sub.public_input);
             }
             Ok(())
         })
     }
 }
 
+/// -------------------------------
+/// Função auxiliar para ler provas de arquivos
+/// -------------------------------
 fn read_proof(path: &str) -> Vec<u8> {
     let mut f = File::open(path).expect("Não conseguiu abrir arquivo de prova");
     let mut buf = Vec::new();
@@ -77,39 +90,45 @@ fn read_proof(path: &str) -> Vec<u8> {
     buf
 }
 
+/// -------------------------------
+/// Main: gera provas agregadas recursivas
+/// -------------------------------
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let k = 8;
     let params: Params<EpAffine> = Params::new(k);
 
-    // Lê provas externas
+    // 🔹 Lê provas externas
     let proofs: Vec<Vec<u8>> = ["proof1.bin", "proof2.bin", "proof3.bin"]
         .iter().map(|f| read_proof(f)).collect();
 
-    // Define valores públicos conhecidos
+    // 🔹 Valores públicos conhecidos
     let public_inputs: Vec<Fr> = vec![Fr::from(10), Fr::from(20), Fr::from(30)];
 
-    // Cria subcircuits para cada prova
+    // 🔹 Dummy circuit para gerar VKs de exemplo (substituir por VKs reais)
+    let dummy_circuit = VerifierCircuit { proof_bytes: vec![], public_input: Fr::zero(), vk: keygen_vk(&params, &VerifierCircuit { proof_bytes: vec![], public_input: Fr::zero(), vk: panic!("dummy") })? };
+
+    // 🔹 Cria subcircuits verificadores
     let subcircuits: Vec<VerifierCircuit> = proofs.into_iter()
         .zip(public_inputs.iter())
-        .map(|(proof_bytes, &pub_input)| VerifierCircuit { proof_bytes, public_input: pub_input })
+        .map(|(proof_bytes, &pub_input)| VerifierCircuit { proof_bytes, public_input: pub_input, vk: dummy_circuit.vk.clone() })
         .collect();
 
-    // Circuito agregador recursivo
+    // 🔹 Circuito agregador recursivo
     let agg_circuit = AggregatorCircuit { subcircuits };
 
-    // Geração de chaves
+    // 🔹 Geração de chaves do agregador
     let vk_agg = keygen_vk(&params, &agg_circuit)?;
     let pk_agg = keygen_pk(&params, vk_agg.clone(), &agg_circuit)?;
 
-    // Prova final
+    // 🔹 Criação da prova final agregada
     let mut proof_final = Vec::new();
     let mut transcript = Blake2bWrite::<_, _, Challenge255<EpAffine>>::init(&mut proof_final);
-
     create_proof(&params, &pk_agg, &[agg_circuit], &[], &mut OsRng, &mut transcript)?;
 
     println!("✅ Prova recursiva agregada gerada com {} bytes", proof_final.len());
 
+    // 🔹 Salva em arquivo
     let mut file = BufWriter::new(File::create("proof_aggregated.bin")?);
     file.write_all(&proof_final)?;
 
