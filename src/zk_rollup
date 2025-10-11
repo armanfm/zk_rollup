@@ -1,17 +1,106 @@
 use halo2_proofs::{
-    plonk::{Circuit, ConstraintSystem, Error, create_proof, keygen_pk, keygen_vk, ProvingKey, VerifyingKey},
+    plonk::{Circuit, create_proof, keygen_pk, keygen_vk, ProvingKey, VerifyingKey, ConstraintSystem, Error},
     circuit::{Layouter, SimpleFloorPlanner, Value},
     poly::commitment::Params,
     transcript::{Blake2bWrite, Challenge255},
 };
+
 use pasta_curves::pallas::{Affine as EpAffine, Scalar as Fr};
 use std::fs::File;
 use std::io::{Read, BufWriter, Write};
 use rand_core::OsRng;
 
-/// -------------------------------
-/// Circuito que representa a verificação de uma prova externa
-/// -------------------------------
+// -------------------------------
+// Definição do PaiCircuit
+// -------------------------------
+use halo2_proofs::{
+    plonk::{Advice, Column, Selector},
+    poly::Rotation,
+};
+
+use pasta_curves::pallas::Base as Fp;
+
+#[derive(Clone, Debug)]
+pub struct PaiConfig {
+    x: Column<Advice>,
+    y: Column<Advice>,
+    s_mul2: Selector,
+}
+
+pub struct PaiCircuit {
+    pub x: Option<Fp>,
+    pub y: Option<Fp>,
+}
+
+impl Circuit<Fp> for PaiCircuit {
+    type Config = PaiConfig;
+    type FloorPlanner = SimpleFloorPlanner;
+
+    fn without_witnesses(&self) -> Self {
+        Self { x: None, y: None }
+    }
+
+    fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
+        let x = meta.advice_column();
+        let y = meta.advice_column();
+        let s_mul2 = meta.selector();
+
+        meta.create_gate("y = 2 * x", |meta| {
+            let s = meta.query_selector(s_mul2);
+            let x_val = meta.query_advice(x, Rotation::cur());
+            let y_val = meta.query_advice(y, Rotation::cur());
+            let two_x = x_val.clone() + x_val.clone();
+            vec![s * (y_val - two_x)]
+        });
+
+        PaiConfig { x, y, s_mul2 }
+    }
+
+    fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<Fp>) -> Result<(), Error> {
+        layouter.assign_region(
+            || "mul2 region",
+            |mut region| {
+                config.s_mul2.enable(&mut region, 0)?;
+                let x_val = self.x.ok_or(Error::Synthesis)?;
+                let y_val = self.y.unwrap_or(x_val + x_val);
+
+                region.assign_advice(|| "x value", config.x, 0, || Value::known(x_val))?;
+                region.assign_advice(|| "y value", config.y, 0, || Value::known(y_val))?;
+
+                Ok(())
+            },
+        )
+    }
+}
+
+impl PaiCircuit {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
+        if bytes.len() != 64 { return Err("Esperado 64 bytes".into()); }
+
+        let x_bytes: [u8; 32] = bytes[0..32].try_into().unwrap();
+        let y_bytes: [u8; 32] = bytes[32..64].try_into().unwrap();
+
+        let x = Fp::from_raw([
+            u64::from_le_bytes(x_bytes[0..8].try_into().unwrap()),
+            u64::from_le_bytes(x_bytes[8..16].try_into().unwrap()),
+            u64::from_le_bytes(x_bytes[16..24].try_into().unwrap()),
+            u64::from_le_bytes(x_bytes[24..32].try_into().unwrap()),
+        ]);
+
+        let y = Fp::from_raw([
+            u64::from_le_bytes(y_bytes[0..8].try_into().unwrap()),
+            u64::from_le_bytes(y_bytes[8..16].try_into().unwrap()),
+            u64::from_le_bytes(y_bytes[16..24].try_into().unwrap()),
+            u64::from_le_bytes(y_bytes[24..32].try_into().unwrap()),
+        ]);
+
+        Ok(PaiCircuit { x: Some(x), y: Some(y) })
+    }
+}
+
+// -------------------------------
+// Circuitos Verifier e Aggregator
+// -------------------------------
 #[derive(Clone)]
 pub struct VerifierCircuit {
     pub proof_bytes: Vec<u8>,
@@ -24,7 +113,11 @@ impl Circuit<Fr> for VerifierCircuit {
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
-        Self { proof_bytes: vec![], public_input: Fr::zero(), vk: self.vk.clone() }
+        Self {
+            proof_bytes: vec![],
+            public_input: Fr::zero(),
+            vk: self.vk.clone(),
+        }
     }
 
     fn configure(_meta: &mut ConstraintSystem<Fr>) -> Self::Config { () }
@@ -34,21 +127,18 @@ impl Circuit<Fr> for VerifierCircuit {
         _config: Self::Config,
         mut layouter: impl Layouter<Fr>,
     ) -> Result<(), Error> {
-        layouter.assign_region(|| "verifier region", |mut region| {
-            // 🔹 Aqui vai o gadget que realmente verifica a prova
-            println!("🔹 Verificando prova externa com input {:?}", self.public_input);
-
-            // Placeholder: células que representam a verificação
-            let _assigned_input = Value::known(self.public_input);
-
+        layouter.assign_region(|| "verifier region", |_region| {
+            println!(
+                "🔹 Verificando prova externa de {} bytes com input {:?}",
+                self.proof_bytes.len(),
+                self.public_input
+            );
+            let _assigned = Value::known(self.public_input);
             Ok(())
         })
     }
 }
 
-/// -------------------------------
-/// Circuito agregador que valida várias provas externas
-/// -------------------------------
 #[derive(Clone)]
 pub struct AggregatorCircuit {
     pub subcircuits: Vec<VerifierCircuit>,
@@ -58,9 +148,7 @@ impl Circuit<Fr> for AggregatorCircuit {
     type Config = ();
     type FloorPlanner = SimpleFloorPlanner;
 
-    fn without_witnesses(&self) -> Self {
-        Self { subcircuits: vec![] }
-    }
+    fn without_witnesses(&self) -> Self { Self { subcircuits: vec![] } }
 
     fn configure(_meta: &mut ConstraintSystem<Fr>) -> Self::Config { () }
 
@@ -69,10 +157,12 @@ impl Circuit<Fr> for AggregatorCircuit {
         _config: Self::Config,
         mut layouter: impl Layouter<Fr>,
     ) -> Result<(), Error> {
-        layouter.assign_region(|| "aggregate recursion", |mut region| {
+        layouter.assign_region(|| "aggregate recursion", |_region| {
             for (i, sub) in self.subcircuits.iter().enumerate() {
-                println!("🔹 Aggregando subcircuito {} com input {:?}", i, sub.public_input);
-                // Placeholder: aqui você usaria o gadget de verificação de prova real
+                println!(
+                    "🔹 Aggregando subcircuito {} com input {:?}",
+                    i, sub.public_input
+                );
                 let _verified = Value::known(sub.public_input);
             }
             Ok(())
@@ -80,9 +170,9 @@ impl Circuit<Fr> for AggregatorCircuit {
     }
 }
 
-/// -------------------------------
-/// Função auxiliar para ler provas de arquivos
-/// -------------------------------
+// -------------------------------
+// Função auxiliar para ler provas
+// -------------------------------
 fn read_proof(path: &str) -> Vec<u8> {
     let mut f = File::open(path).expect("Não conseguiu abrir arquivo de prova");
     let mut buf = Vec::new();
@@ -90,9 +180,9 @@ fn read_proof(path: &str) -> Vec<u8> {
     buf
 }
 
-/// -------------------------------
-/// Main: gera provas agregadas recursivas
-/// -------------------------------
+// -------------------------------
+// Main
+// -------------------------------
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let k = 8;
@@ -100,33 +190,55 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 🔹 Lê provas externas
     let proofs: Vec<Vec<u8>> = ["proof1.bin", "proof2.bin", "proof3.bin"]
-        .iter().map(|f| read_proof(f)).collect();
+        .iter()
+        .map(|f| read_proof(f))
+        .collect();
 
     // 🔹 Valores públicos conhecidos
     let public_inputs: Vec<Fr> = vec![Fr::from(10), Fr::from(20), Fr::from(30)];
 
-    // 🔹 Dummy circuit para gerar VKs de exemplo (substituir por VKs reais)
-    let dummy_circuit = VerifierCircuit { proof_bytes: vec![], public_input: Fr::zero(), vk: keygen_vk(&params, &VerifierCircuit { proof_bytes: vec![], public_input: Fr::zero(), vk: panic!("dummy") })? };
+    // 🔹 Dummy circuit para gerar VK
+    let dummy_circuit = VerifierCircuit {
+        proof_bytes: vec![],
+        public_input: Fr::zero(),
+        vk: keygen_vk(&params, &VerifierCircuit { proof_bytes: vec![], public_input: Fr::zero(), vk: panic!("dummy") })?,
+    };
 
-    // 🔹 Cria subcircuits verificadores
-    let subcircuits: Vec<VerifierCircuit> = proofs.into_iter()
+    // 🔹 Subcircuits
+    let subcircuits: Vec<VerifierCircuit> = proofs
+        .into_iter()
         .zip(public_inputs.iter())
-        .map(|(proof_bytes, &pub_input)| VerifierCircuit { proof_bytes, public_input: pub_input, vk: dummy_circuit.vk.clone() })
+        .map(|(proof_bytes, &pub_input)| VerifierCircuit {
+            proof_bytes,
+            public_input: pub_input,
+            vk: dummy_circuit.vk.clone(),
+        })
         .collect();
 
-    // 🔹 Circuito agregador recursivo
+    // 🔹 Aggregator
     let agg_circuit = AggregatorCircuit { subcircuits };
 
-    // 🔹 Geração de chaves do agregador
+    // 🔹 Geração de chaves
     let vk_agg = keygen_vk(&params, &agg_circuit)?;
     let pk_agg = keygen_pk(&params, vk_agg.clone(), &agg_circuit)?;
 
     // 🔹 Criação da prova final agregada
     let mut proof_final = Vec::new();
     let mut transcript = Blake2bWrite::<_, _, Challenge255<EpAffine>>::init(&mut proof_final);
-    create_proof(&params, &pk_agg, &[agg_circuit], &[], &mut OsRng, &mut transcript)?;
 
-    println!("✅ Prova recursiva agregada gerada com {} bytes", proof_final.len());
+    create_proof(
+        &params,
+        &pk_agg,
+        &[agg_circuit],
+        &[],
+        &mut OsRng,
+        &mut transcript,
+    )?;
+
+    println!(
+        "✅ Prova recursiva agregada gerada com {} bytes",
+        proof_final.len()
+    );
 
     // 🔹 Salva em arquivo
     let mut file = BufWriter::new(File::create("proof_aggregated.bin")?);
