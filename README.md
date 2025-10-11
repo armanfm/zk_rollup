@@ -1,51 +1,50 @@
-## 🧩 Roadmap for Full Recursive Proof in zk_rollup
+## 🧩 zk_rollup: Roadmap for Full Recursive Proof
 
-This project already demonstrates a working **Halo2 proof generation and verification pipeline**.  
-The next major milestone is achieving a **fully recursive proof** — a proof that *verifies another Halo2 proof inside a circuit*.  
-
-Below is a precise checklist of what remains to reach a complete recursive setup.
-
----
+This project implements **proof aggregation** with Halo2.  
 
 ### ✅ Current Progress
-- [x] Working circuits for basic computations (`fq_circuit.rs`, `ep_circuit.rs`, etc.)  
-- [x] Proof generation with `create_proof`  
-- [x] Verification with `verify_proof`  
-- [x] Modular design separating prover, verifier, and rollup logic (`zk_rollup.rs`, `verifier_circuit.rs`)
+- [x] Individual computation circuits (`PaiCircuit`) generate valid proofs.
+- [x] `VerifierCircuit` can read external proofs and public inputs.
+- [x] `AggregatorCircuit` collects multiple `VerifierCircuit`s and produces an **aggregated proof** (`proof_aggregated.bin`).
+- [x] `zk_rollup.rs` handles:
+  - [x] Reading proofs from files.
+  - [x] Converting `Fp` inputs to `Fr`.
+  - [x] Generating VK/PK for aggregator.
+  - [x] Producing the final aggregated proof.
+
+> **Note:** The aggregated proof currently **does not verify individual proofs inside the circuit**; it only aggregates them.
 
 ---
 
-### 🚧 TODO: Steps for a Real Recursive Proof
+### 🚧 Next Steps for Full Recursive Proof
 
 #### 1️⃣ Prepare Inner Proof Artifacts
-- [ ] Serialize the **Verifying Key (VK)** of the inner proof into field elements so it can be loaded inside a circuit.  
-- [ ] Represent **public inputs** and **commitments** of the inner proof as `AssignedCell<Fr>` values.  
-- [ ] Pass these serialized values into the recursive circuit as advice inputs.
+- [ ] Serialize inner proof VKs into circuit-friendly field elements.
+- [ ] Represent public inputs and commitments as `AssignedCell<Fr>`.
 
-#### 2️⃣ Build the In-Circuit Verifier Gadget
-- [ ] Implement the **verifier logic inside Halo2**, reproducing the PLONK verification equation within a circuit.  
-- [ ] Compute all relevant challenges (`β, γ, α, ζ`) inside the circuit.  
-- [ ] Reconstruct the polynomial commitment equation and enforce it via constraints.  
-- [ ] Check consistency between the in-circuit VK and the external VK of the inner proof.
+#### 2️⃣ Build In-Circuit Verifier Gadget
+- [ ] Implement PLONK verification inside a Halo2 circuit.
+- [ ] Compute challenges (`β, γ, α, ζ`) and reconstruct polynomial commitments.
+- [ ] Enforce VK consistency between inner and aggregator proofs.
 
 #### 3️⃣ Embed Previous Proofs
-- [ ] Allow the recursive circuit to take one or more previous proofs as input.  
-- [ ] Convert each proof’s commitments and evaluations into circuit-friendly field representations.  
-- [ ] Optionally, compress these proofs for efficient embedding (e.g., hash or Merkle inclusion).
+- [ ] Feed one or more prior proofs into the recursive circuit.
+- [ ] Convert proofs’ commitments/evaluations into field elements.
+- [ ] Optionally compress proofs for efficiency (hash/Merkle).
 
-#### 4️⃣ Implement Proof Aggregation
-- [ ] Create an **accumulator gadget** to combine multiple proofs into a single set of commitments (MSM-based or linear combination).  
-- [ ] Ensure the accumulator output can be verified by the next recursive layer.
+#### 4️⃣ Proof Aggregation
+- [ ] Build an accumulator gadget to combine multiple proofs into one.
+- [ ] Ensure output is verifiable by the next recursive layer.
 
 #### 5️⃣ Final Verification Layer
-- [ ] Generate a new proof from the recursive circuit.  
-- [ ] Verify that proof externally using the standard Halo2 verifier (`verify_proof`).  
-- [ ] This final verification closes the recursion — one proof validates all previous ones.
+- [ ] Generate a recursive proof from the aggregator circuit.
+- [ ] Verify externally with standard `verify_proof`.
+- [ ] Close the recursion: one proof validates all previous ones.
 
 ---
 
-### 🧠 Notes
-- Recursive verification requires both **field serialization** and **circuit-safe VK encoding** — see how Zcash’s Halo2 recursive verifier handles this.  
-- Modularizing the verifier gadget as its own module (e.g., `recursive_verifier.rs`) will make it easier to reuse and test.  
-- Once implemented, the project will support **true proof aggregation**, enabling zk-rollup batch verification.
+### ⚠️ Current Limitation
+- Aggregated proofs **do not yet validate individual proofs inside the circuit**.  
+- Implementing full recursive verification is the next milestone.
+
 
