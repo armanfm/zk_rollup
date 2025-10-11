@@ -12,7 +12,7 @@ This project implements **proof aggregation** with Halo2.
   - [x] Generating VK/PK for aggregator.
   - [x] Producing the final aggregated proof.
 
-
+* It still does not verify the internal aggregated proof.
 
 ---
 
