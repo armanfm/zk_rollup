@@ -12,7 +12,7 @@ This project implements **proof aggregation** with Halo2.
   - [x] Generating VK/PK for aggregator.
   - [x] Producing the final aggregated proof.
 
-> **Note:** The aggregated proof currently **does not verify individual proofs inside the circuit**; it only aggregates them.
+
 
 ---
 
