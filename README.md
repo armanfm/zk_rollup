@@ -13,7 +13,6 @@ This project implements **proof aggregation** with Halo2.
   - [x] Producing the final aggregated proof.
   - [x] **Private verification of the aggregated proof within the rollup** ✅
 
-* Aggregated proofs still do not verify individual proofs inside the circuit (full recursion not implemented yet).
 
 ---
 
