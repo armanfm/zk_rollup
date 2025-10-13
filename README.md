@@ -11,8 +11,9 @@ This project implements **proof aggregation** with Halo2.
   - [x] Converting `Fp` inputs to `Fr`.
   - [x] Generating VK/PK for aggregator.
   - [x] Producing the final aggregated proof.
+  - [x] **Private verification of the aggregated proof within the rollup** ✅
 
-* It still does not verify the internal aggregated proof.
+* Aggregated proofs still do not verify individual proofs inside the circuit (full recursion not implemented yet).
 
 ---
 
