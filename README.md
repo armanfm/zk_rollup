@@ -44,8 +44,5 @@ This project implements **proof aggregation** with Halo2.
 
 ---
 
-### ⚠️ Current Limitation
-- Aggregated proofs **do not yet validate individual proofs inside the circuit**.  
-- Implementing full recursive verification is the next milestone.
 
 
