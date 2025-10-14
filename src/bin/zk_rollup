@@ -1,93 +1,137 @@
-use halo2_minimal::{pai_circuit::PaiCircuit, aggregator_circuit::AggregatorCircuit};
-use halo2_proofs::{
-    plonk::{create_proof, keygen_pk, keygen_vk, verify_proof, VerifyingKey},
-    poly::commitment::Params,
-    transcript::{Blake2bWrite, Blake2bRead, Challenge255},
-};
-use pasta_curves::pallas::{Affine as EpAffine, Scalar as Fr};
-use ff::PrimeField;
-use rand_core::OsRng;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use warp::Filter;
 use serde::{Deserialize, Serialize};
-use std::error::Error;
+use halo2_proofs::{
+    plonk::{create_proof, keygen_pk, keygen_vk, SingleVerifier, verify_proof},
+    poly::commitment::Params,
+    dev::MockProver,
+    transcript::{Blake2bWrite, Blake2bRead, Challenge255},
+};
+use pasta_curves::{vesta::Base as Fq, pallas::Affine as EpAffine};
+use pasta_curves::group::ff::PrimeField;
+use rand_core::OsRng;
+use std::convert::TryInto;
+use std::fs;
 
-// ----------------- JSON Structs -----------------
+// --- Importa direto dos módulos da crate ---
+ use halo2_minimal::{MyFq, FqOp, AggregatorCircuit};
+
+// --- Estruturas de request e response ---
 #[derive(Deserialize)]
-struct AgregadoRequest {
+struct AggregatorRequest {
     proof_bytes: Vec<u8>,
-    sub_public_inputs: Vec<Vec<[u8; 32]>>, // cada Fr como 32 bytes
+    sub_inputs: Vec<Vec<u8>>, // Cada sub_input em Fq, 32 bytes
 }
 
 #[derive(Serialize)]
-struct AgregadoResponse {
-    valido: bool,
+struct AggregatorResponse {
+    message: String,
+    proof_size: usize,
 }
 
-// ----------------- Conversão bytes -> Fr -----------------
-fn bytes_to_fr(bytes: &[u8; 32]) -> Fr {
-    let mut limbs = [0u64; 4];
-    for i in 0..4 {
-        limbs[i] = u64::from_le_bytes(bytes[i * 8..(i + 1) * 8].try_into().unwrap());
+// --- Converte bytes para Fq ---
+fn bytes_to_fq(bytes: &[u8]) -> Fq {
+    let arr: [u8; 32] = bytes.try_into().expect("Cada Fq deve ter 32 bytes");
+    Fq::from_repr(arr).expect("Fq inválido")
+}
+
+// --- Função de agregação ---
+async fn aggregate_flow_from_json(requests: Vec<AggregatorRequest>) -> Result<String, String> {
+    println!("📥 Recebidas {} provas do prover", requests.len());
+
+    let k = 8;
+    let params: Params<EpAffine> = Params::new(k);
+
+    let mut proofs_bytes = Vec::new();
+    let mut sub_inputs_fq = Vec::new();
+    let mut sub_vks = Vec::new();
+
+    for (i, req) in requests.iter().enumerate() {
+        proofs_bytes.push(req.proof_bytes.clone());
+
+        // Converte inputs para Fq
+        let inputs_fq: Vec<Fq> = req.sub_inputs.iter().map(|b| bytes_to_fq(b)).collect();
+        sub_inputs_fq.push(inputs_fq.clone());
+
+        // Cria um subcircuito MyFq simples só para gerar VK
+        let mut ops = Vec::new();
+        for pair in inputs_fq.windows(2) {
+            ops.push(FqOp::Add(pair[0], pair[1])); // Exemplo: operação de add
+        }
+        let sub_circuit = MyFq::new(ops);
+        let vk_sub = keygen_vk(&params, &sub_circuit).map_err(|e| e.to_string())?;
+        sub_vks.push(vk_sub);
+
+        println!("🔹 Processando prova #{}", i);
+        println!("   - Sub-inputs Fq: {:?}", inputs_fq);
     }
-    Fr::from_raw(limbs)
-}
 
-// ----------------- Verificação privada -----------------
-async fn verificar_agregado(
-    proof_bytes: Vec<u8>,
-    sub_public_inputs: Vec<Vec<Fr>>,
-    vk_agg: &VerifyingKey<EpAffine>,
-    params: &Params<EpAffine>,
-) -> Result<bool, warp::Rejection> {
-    // Concatena cada vetor de inputs para formar &[&[Fr]]
-    let instances: Vec<&[Fr]> = sub_public_inputs.iter().map(|v| v.as_slice()).collect();
-
-    let mut transcript = Blake2bRead::<_, _, Challenge255<EpAffine>>::init(&proof_bytes[..]);
-
-    match verify_proof(params, vk_agg, &[&instances], &mut transcript) {
-        Ok(_) => Ok(true),
-        Err(_) => Ok(false),
-    }
-}
-
-// ----------------- Handler Warp -----------------
-async fn rollup_verifica(req: AgregadoRequest, state: Arc<Mutex<VerifyingKey<EpAffine>>>) -> Result<AgregadoResponse, warp::Rejection> {
-    let vk_agg = { let guard = state.lock().await; guard.clone() };
-    let params = Params::<EpAffine>::new(16);
-
-    // Converte bytes -> Fr
-    let sub_public_inputs: Vec<Vec<Fr>> = req.sub_public_inputs.iter()
-        .map(|pair_bytes| pair_bytes.iter().map(|b| bytes_to_fr(b)).collect())
-        .collect();
-
-    let valido = verificar_agregado(req.proof_bytes, sub_public_inputs, &vk_agg, &params).await?;
-    Ok(AgregadoResponse { valido })
-}
-
-// ----------------- Main -----------------
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
-    // Cria VK dummy do AggregatorCircuit (igual ao que será usado para gerar provas)
-    let params = Params::<EpAffine>::new(16);
-    let dummy_agg = AggregatorCircuit {
-        sub_proofs: vec![],
-        sub_public_inputs: vec![],
-        sub_vks: vec![],
+    // --- Construir circuito agregador ---
+    let agg_circuit = AggregatorCircuit {
+        sub_proofs: proofs_bytes,
+        sub_public_inputs: sub_inputs_fq,
+        sub_vks,
         params: params.clone(),
     };
-    let vk_agg = keygen_vk(&params, &dummy_agg)?;
-    let vk_state = Arc::new(Mutex::new(vk_agg));
 
-    let rollup_route = warp::post()
-        .and(warp::path("rollup_verifica"))
-        .and(warp::body::json())
-        .and(warp::any().map(move || Arc::clone(&vk_state)))
-        .and_then(rollup_verifica);
+    // --- PK/VK do agregador ---
+    println!("🔑 Gerando PK/VK do circuito agregador...");
+    let vk_agg = keygen_vk(&params, &agg_circuit).map_err(|e| e.to_string())?;
+    let pk_agg = keygen_pk(&params, vk_agg.clone(), &agg_circuit).map_err(|e| e.to_string())?;
+    println!("✅ PK/VK gerados");
 
-    println!("🚀 Rollup rodando em http://127.0.0.1:3030");
-    warp::serve(rollup_route).run(([127, 0, 0, 1], 3030)).await;
+    // --- MockProver para checagem ---
+    let prover = MockProver::run(k, &agg_circuit, vec![]).map_err(|e| e.to_string())?;
+    prover.assert_satisfied();
+
+    // --- Cria prova agregada ---
+    println!("🛠️ Gerando prova agregada...");
+    let mut proof_final = Vec::new();
+    let mut transcript = Blake2bWrite::<_, _, Challenge255<EpAffine>>::init(&mut proof_final);
+    create_proof(&params, &pk_agg, &[agg_circuit], &[], &mut OsRng, &mut transcript)
+        .map_err(|e| e.to_string())?;
+    println!("✅ Prova agregada gerada com {} bytes", proof_final.len());
+
+    // --- Verifica prova agregada ---
+    let mut transcript_read = Blake2bRead::<_, _, Challenge255<EpAffine>>::init(&proof_final[..]);
+    let strategy = SingleVerifier::new(&params);
+    verify_proof(&params, &vk_agg, strategy, &[], &mut transcript_read)
+        .map_err(|e| e.to_string())?;
+    println!("✅ Prova agregada verificada com sucesso!");
+
+    fs::write("proof_aggregated.bin", &proof_final).map_err(|e| e.to_string())?;
+    println!("💾 Prova agregada salva em proof_aggregated.bin");
+
+    Ok(format!("Prova agregada gerada e verificada! Bytes: {}", proof_final.len()))
+}
+
+// --- Warp server ---
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let aggregate_route = warp::path("aggregate")
+        .and(warp::post())
+        .and(warp::body::json::<Vec<AggregatorRequest>>())
+        .and_then(|requests: Vec<AggregatorRequest>| async move {
+            match aggregate_flow_from_json(requests).await {
+                Ok(msg) => Ok::<_, warp::Rejection>(warp::reply::json(&AggregatorResponse {
+                    message: msg.clone(),
+                    proof_size: msg.len(),
+                })),
+                Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(&AggregatorResponse {
+                    message: format!("Erro: {}", e),
+                    proof_size: 0,
+                })),
+            }
+        });
+
+    let status_route = warp::path::end().map(|| warp::reply::json(&serde_json::json!({
+        "status": "ok",
+        "message": "Servidor agregador rodando"
+    })));
+
+    let routes = status_route.or(aggregate_route);
+
+    println!("🚀 Agregador rodando em http://0.0.0.0:8082");
+    warp::serve(routes).run(([0, 0, 0, 0], 8082)).await;
 
     Ok(())
 }
