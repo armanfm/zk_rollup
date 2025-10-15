@@ -1,177 +1,136 @@
 use halo2_proofs::{
-    circuit::{Layouter, SimpleFloorPlanner, Value},
-    plonk::{Circuit, create_proof, keygen_pk, keygen_vk, ProvingKey, VerifyingKey, ConstraintSystem, Error, SingleVerifier, verify_proof},
+    circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
+    plonk::{Circuit, ConstraintSystem, Column, Advice, Error, VerifyingKey, verify_proof, SingleVerifier},
     poly::commitment::Params,
-    transcript::{Blake2bWrite, Blake2bRead, Challenge255},
+    transcript::{Blake2bRead, Challenge255},
 };
-use pasta_curves::pallas::{Affine as EpAffine, Base as Fp, Scalar as Fr};
-use rand_core::OsRng;
-use std::fs::File;
-use std::io::{Read, BufWriter, Write};
+use pasta_curves::pallas::{Affine as EpAffine, Scalar as Fr};
 
-// ---------------- PaiCircuit ----------------
+/// Configuração do AggregatorCircuit
 #[derive(Clone)]
-pub struct PaiCircuit {
-    pub x: Option<Fp>,
-    pub y: Option<Fp>,
+pub struct AggregatorConfig {
+    proof_valid: Column<Advice>,
+    all_valid: Column<Advice>,
 }
 
-#[derive(Clone, Debug)]
-pub struct PaiConfig {
-    x: halo2_proofs::plonk::Column<halo2_proofs::plonk::Advice>,
-    y: halo2_proofs::plonk::Column<halo2_proofs::plonk::Advice>,
-    s_mul2: halo2_proofs::plonk::Selector,
-}
-
-impl Circuit<Fp> for PaiCircuit {
-    type Config = PaiConfig;
-    type FloorPlanner = SimpleFloorPlanner;
-
-    fn without_witnesses(&self) -> Self {
-        Self { x: None, y: None }
-    }
-
-    fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
-        let x = meta.advice_column();
-        let y = meta.advice_column();
-        let s_mul2 = meta.selector();
-
-        meta.create_gate("y = 2 * x", |meta| {
-            let s = meta.query_selector(s_mul2);
-            let x_val = meta.query_advice(x, halo2_proofs::poly::Rotation::cur());
-            let y_val = meta.query_advice(y, halo2_proofs::poly::Rotation::cur());
-            let two_x = x_val.clone() + x_val.clone();
-            vec![s * (y_val - two_x)]
-        });
-
-        PaiConfig { x, y, s_mul2 }
-    }
-
-    fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<Fp>) -> Result<(), Error> {
-        layouter.assign_region(
-            || "mul2",
-            |mut region| {
-                config.s_mul2.enable(&mut region, 0)?;
-                let x_val = self.x.ok_or(Error::Synthesis)?;
-                let y_val = self.y.unwrap_or(x_val + x_val);
-
-                region.assign_advice(|| "x", config.x, 0, || Value::known(x_val))?;
-                region.assign_advice(|| "y", config.y, 0, || Value::known(y_val))?;
-                Ok(())
-            },
-        )
-    }
-}
-
-// ---------------- VerifierCircuit ----------------
+/// AggregatorCircuit recursivo que verifica provas externas
 #[derive(Clone)]
-pub struct VerifierCircuit {
-    pub proof_bytes: Vec<u8>,
-    pub public_input: Fp,
-    pub vk: VerifyingKey<EpAffine>,
+pub struct AggregatorCircuit {
+    pub sub_proofs: Vec<Vec<u8>>,            // bytes de provas externas
+    pub sub_public_inputs: Vec<Vec<Fr>>,     // inputs públicos de cada prova
+    pub sub_vks: Vec<VerifyingKey<EpAffine>>, // VK de cada prova
     pub params: Params<EpAffine>,
 }
 
-impl Circuit<Fp> for VerifierCircuit {
-    type Config = ();
+/// Gadget que verifica uma prova externa e retorna AssignedCell<Fr, Fr>
+fn verify_proof_gadget(
+    layouter: &mut impl Layouter<Fr>,
+    config: &AggregatorConfig,
+    proof_bytes: &[u8],
+    public_inputs: &[Fr],
+    vk: &VerifyingKey<EpAffine>,
+    params: &Params<EpAffine>,
+) -> Result<AssignedCell<Fr, Fr>, Error> {
+    let mut proof_slice: &[u8] = proof_bytes;
+    let mut reader = Blake2bRead::<_, _, Challenge255<EpAffine>>::init(&mut proof_slice);
+    let strategy = SingleVerifier::new(params);
+
+    let nested_inputs: &[&[&[Fr]]] = &[&[&public_inputs[..]]];
+    let result = verify_proof(params, vk, strategy, nested_inputs, &mut reader);
+
+    layouter.assign_region(
+        || "verify proof",
+        |mut region| {
+            let val = match result {
+                Ok(_) => Fr::one(),
+                Err(_) => Fr::zero(),
+            };
+            let cell = region.assign_advice(
+                || "proof valid",
+                config.proof_valid,
+                0,
+                || Value::known(val),
+            )?;
+            Ok(cell)
+        },
+    )
+}
+
+impl Circuit<Fr> for AggregatorCircuit {
+    type Config = AggregatorConfig;
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
         Self {
-            proof_bytes: vec![],
-            public_input: Fp::zero(),
-            vk: self.vk.clone(),
+            sub_proofs: vec![],
+            sub_public_inputs: vec![],
+            sub_vks: vec![],
             params: self.params.clone(),
         }
     }
 
-    fn configure(_meta: &mut ConstraintSystem<Fp>) -> Self::Config { () }
+    fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
+        let proof_valid = meta.advice_column();
+        let all_valid = meta.advice_column();
 
-    fn synthesize(&self, _config: Self::Config, _layouter: impl Layouter<Fp>) -> Result<(), Error> {
-        // Prepara array público para a verificação
-        let binding = [self.public_input];
-        let instances_ref: Vec<&[Fp]> = vec![&binding];
-        let instances: &[&[&[Fp]]] = &[&instances_ref];
+        meta.enable_equality(proof_valid);
+        meta.enable_equality(all_valid);
 
-        let mut transcript = Blake2bRead::<_, _, Challenge255<EpAffine>>::init(&self.proof_bytes[..]);
-        let strategy = SingleVerifier::new(&self.params);
-
-        verify_proof(&self.params, &self.vk, strategy, instances, &mut transcript)
-            .map_err(|_| Error::Synthesis)?;
-        println!("✅ Prova externa verificada: {:?}", self.public_input);
-        Ok(())
-    }
-}
-
-// ---------------- AggregatorCircuit ----------------
-#[derive(Clone)]
-pub struct AggregatorCircuit {
-    pub subcircuits: Vec<VerifierCircuit>,
-    pub params: Params<EpAffine>,
-}
-
-impl Circuit<Fp> for AggregatorCircuit {
-    type Config = ();
-    type FloorPlanner = SimpleFloorPlanner;
-
-    fn without_witnesses(&self) -> Self {
-        Self { subcircuits: vec![], params: self.params.clone() }
+        AggregatorConfig { proof_valid, all_valid }
     }
 
-    fn configure(_meta: &mut ConstraintSystem<Fp>) -> Self::Config { () }
+    fn synthesize(
+        &self,
+        config: Self::Config,
+        mut layouter: impl Layouter<Fr>,
+    ) -> Result<(), Error> {
+        let mut all_valid_cell: Option<AssignedCell<Fr, Fr>> = None;
 
-    fn synthesize(&self, _config: Self::Config, mut layouter: impl Layouter<Fp>) -> Result<(), Error> {
-        for (i, sub) in self.subcircuits.iter().enumerate() {
-            sub.synthesize((), layouter.namespace(|| format!("subcircuit {}", i)))?;
+        for (i, proof_bytes) in self.sub_proofs.iter().enumerate() {
+            let public_inputs = &self.sub_public_inputs[i];
+            let vk = &self.sub_vks[i];
+
+            let verified_cell = verify_proof_gadget(
+                &mut layouter,
+                &config,
+                proof_bytes,
+                public_inputs,
+                vk,
+                &self.params,
+            )?;
+
+            // Multiplica resultados para acumular validação
+            all_valid_cell = Some(match all_valid_cell {
+                Some(prev) => {
+                    layouter.assign_region(
+                        || format!("accumulate {}", i),
+                        |mut region| {
+                            let val = prev.value().zip(verified_cell.value()).map(|(a, b)| a * b);
+                            region.assign_advice(|| "all_valid", config.all_valid, 0, || val)
+                        },
+                    )?
+                }
+                None => verified_cell,
+            });
         }
+
+        // Constrange o resultado final a 1 (todas as provas válidas)
+        if let Some(all_valid) = all_valid_cell {
+            layouter.assign_region(
+                || "final constrain",
+                |mut region| {
+                    let one_cell = region.assign_advice(
+                        || "one",
+                        config.all_valid,
+                        1,
+                        || Value::known(Fr::one()),
+                    )?;
+                    region.constrain_equal(all_valid.cell(), one_cell.cell())
+                },
+            )?;
+        }
+
+        println!("✅ Todas as provas agregadas e validadas com sucesso!");
         Ok(())
     }
-}
-
-// ---------------- Main ----------------
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let k = 8;
-    let params: Params<EpAffine> = Params::new(k);
-
-    // 1️⃣ Gerar provas individuais do PaiCircuit
-    let pai_inputs = vec![Fp::from(3), Fp::from(7), Fp::from(11)];
-    let mut proofs = vec![];
-    let mut vks = vec![];
-
-    for &x in &pai_inputs {
-        let circuit = PaiCircuit { x: Some(x), y: None };
-        let vk = keygen_vk(&params, &circuit)?;
-        let pk = keygen_pk(&params, vk.clone(), &circuit)?;
-
-        let mut proof_bytes = Vec::new();
-        let mut transcript = Blake2bWrite::<_, _, Challenge255<EpAffine>>::init(&mut proof_bytes);
-        create_proof(&params, &pk, &[circuit], &[], &mut OsRng, &mut transcript)?;
-        proofs.push(proof_bytes);
-        vks.push(vk);
-    }
-
-    // 2️⃣ Criar VerifierCircuit para cada prova
-    let subcircuits: Vec<VerifierCircuit> = proofs
-        .into_iter()
-        .zip(pai_inputs.iter())
-        .zip(vks.into_iter())
-        .map(|((proof, &x), vk)| VerifierCircuit { proof_bytes: proof, public_input: x, vk, params: params.clone() })
-        .collect();
-
-    // 3️⃣ AggregatorCircuit
-    let agg_circuit = AggregatorCircuit { subcircuits, params: params.clone() };
-
-    // 4️⃣ Criar prova agregada
-    let vk_agg = keygen_vk(&params, &agg_circuit)?;
-    let pk_agg = keygen_pk(&params, vk_agg.clone(), &agg_circuit)?;
-
-    let mut proof_final = Vec::new();
-    let mut transcript = Blake2bWrite::<_, _, Challenge255<EpAffine>>::init(&mut proof_final);
-    create_proof(&params, &pk_agg, &[agg_circuit], &[], &mut OsRng, &mut transcript)?;
-
-    let mut file = BufWriter::new(File::create("aggregated_proof.bin")?);
-    file.write_all(&proof_final)?;
-
-    println!("✅ Prova agregada gerada com {} bytes", proof_final.len());
-    Ok(())
 }
