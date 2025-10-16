@@ -42,7 +42,7 @@ rand_core = { version = "0.6", default-features = false, features = ["getrandom"
 ark-std = { version = "0.3.0", features = ["print-trace"] }
 regex = "1.8.1"
 hex = "0.4.3"
-minha_lib = { path = "../minha_lib" }
+halo2curves = "=0.6.0"
 group = "0.12"
 blake2b_simd = "1.0"
 halo2_poseidon = "0.1.0"
