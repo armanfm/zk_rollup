@@ -1,6 +1,6 @@
-
-pub mod affine_circuit;
-pub use affine_circuit::AffineCircuit;
-
 pub mod aggregator_circuit;
 pub use aggregator_circuit::AggregatorCircuit;
+
+
+pub mod my_fq_circuit;
+pub use my_fq_circuit::MyFqCircuit;
