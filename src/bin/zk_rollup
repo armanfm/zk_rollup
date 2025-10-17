@@ -13,6 +13,9 @@ use pasta_curves::group::ff::PrimeField;
 use anyhow::Result;
 use halo2_minimal::{AggregatorCircuit, MyFqCircuit};
 
+// 🔹 Adicionado para envio HTTP
+use reqwest::Client;
+
 // --------------------
 // Custom Warp Error
 // --------------------
@@ -57,7 +60,7 @@ fn generate_recursive_proof(
     {
         let mut transcript = Blake2bWrite::<_, _, Challenge255<EpAffine>>::init(&mut proof_bytes);
         let mut rng = thread_rng();
-    println!("🧾 será q passa?");
+        println!("🧾 Gerando prova real com Halo2...");
         create_proof(
             params,
             pk,
@@ -85,18 +88,18 @@ async fn aggregate_flow(
     let params: Params<EpAffine> = Params::new(k);
 
     // Converte os bytes recebidos para Fq
-    let sub_public_inputs: Vec<Vec<Fq>> = requests.iter()
+    let sub_public_inputs: Vec<Vec<Fq>> = requests
+        .iter()
         .map(|req| {
-            req.sub_inputs.iter()
+            req.sub_inputs
+                .iter()
                 .map(|arr| Fq::from_repr_vartime(*arr).expect("bytes inválido para Fq"))
                 .collect::<Vec<Fq>>()
         })
         .collect();
 
     // Fake proofs temporárias (só para exemplo; aqui você pode substituir pelo real)
-    let sub_proofs: Vec<Vec<u8>> = requests.iter()
-        .map(|_| vec![0u8; 64])
-        .collect();
+    let sub_proofs: Vec<Vec<u8>> = requests.iter().map(|_| vec![0u8; 64]).collect();
 
     let (pk_arc, vk_arc) = {
         let guard = state.lock().unwrap();
@@ -124,6 +127,25 @@ async fn aggregate_flow(
 
     println!("✅ Prova recursiva gerada e salva! Bytes: {}", proof_bytes.len());
 
+    // 🔹 Envia automaticamente ao servidor Semaphore (porta 3030)
+    tokio::spawn({
+        let proof_to_send = proof_bytes.clone();
+        async move {
+            let client = Client::new();
+            let url = "http://127.0.0.1:3030/submit_proof";
+            println!("🚀 Enviando prova recursiva ao Semaphore: {}", url);
+            match client
+                .post(url)
+                .body(proof_to_send)
+                .send()
+                .await
+            {
+                Ok(res) => println!("✅ [BG] Semaphore respondeu com status: {}", res.status()),
+                Err(e) => eprintln!("❌ Erro ao enviar ao Semaphore: {:?}", e),
+            }
+        }
+    });
+
     Ok(proof_bytes)
 }
 
@@ -144,7 +166,7 @@ async fn main() -> Result<()> {
     println!("⚙️ Gerando VK e PK do agregador...");
     let vk = keygen_vk(&params, &dummy_circuit)?;
     let pk = keygen_pk(&params, vk.clone(), &dummy_circuit)?;
-    println!("✅ PK e VK do agregador gerado.");
+    println!("✅ PK e VK do agregador gerados com sucesso.");
 
     let state: Arc<Mutex<ProverState>> = Arc::new(Mutex::new(ProverState {
         pk: Arc::new(pk),
@@ -171,10 +193,12 @@ async fn main() -> Result<()> {
             }
         });
 
-    let status_route = warp::path::end().map(|| warp::reply::json(&serde_json::json!({
-        "status": "ok",
-        "message": "Servidor agregador recursivo rodando"
-    })));
+    let status_route = warp::path::end().map(|| {
+        warp::reply::json(&serde_json::json!({
+            "status": "ok",
+            "message": "Servidor agregador recursivo rodando e conectado ao Semaphore (3030)"
+        }))
+    });
 
     let routes = status_route.or(aggregate_route);
 
@@ -183,4 +207,3 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
-
