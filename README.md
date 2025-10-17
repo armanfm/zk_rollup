@@ -3,6 +3,8 @@
 ## Objective
 Demonstrate the creation of **real recursive proofs** using Halo2, aggregating multiple subproofs, **without relying on external SNARK libraries**.  
 
+This project implements a functional ZK-Rollup server using Halo2, serving as a **clean educational example** of recursive proof architecture, focusing on **application layer logic** and the aggregation flow of subproofs into a single final rollup.
+
 ## Tools
 - Rust (nightly or recent stable)  
 - Halo2 crates: `halo2_proofs`, `pasta_curves`  
@@ -19,6 +21,18 @@ Demonstrate the creation of **real recursive proofs** using Halo2, aggregating m
 - Most people only create **mock or simple proofs**.  
 - Real **recursive proofs** require the full pipeline to work: PK, VK, circuits, transcript, and instance handling.  
 - Your setup produces a **real, verifiable aggregated proof**, extremely rare in zk-rollup demos and hackathons.  
+
+## ⚠️ Critical Security Disclaimer (Educational Caveat)
+This project is an educational and architectural model focusing on demonstrating ZK-Rollup aggregation using Halo2.  
+
+**Important:** Verification of subproofs in `AggregatorCircuit` is done via simulation (mock). The `verify_proof_gadget` function calls the proof verification on the CPU (outside the circuit) and simply assigns the binary result (valid=1 or invalid=0) to the circuit.  
+
+This means:  
+- There is **no zero-knowledge guarantee** for subproof verification.  
+- A malicious prover could force a value of 1 (valid) even for a false proof, and the aggregator circuit would be satisfied.  
+
+For production:  
+- This function must be replaced by a **full in-circuit SNARK verification**, using ECC chips and pairing checks as implemented in libraries like `halo2-base` or `snark-verifier-sdk`.
 
 ## Code Structure
 
@@ -81,7 +95,7 @@ Works entirely in Halo2, no external SNARK library needed
 
 Even though the code is simple, it achieves a very powerful and rare result
 
-This setup is safe for testing and hackathons, but not ready for industrial use without optimization, audit, and release builds
+Safe for testing and hackathons, but not ready for industrial use without optimization, audit, and release builds
 
 Production Considerations
 Build in release mode (cargo build --release) for performance
@@ -112,6 +126,6 @@ Proof size is compact (960 bytes in the demo)
 
 Pipeline runs fully in Rust/Halo2 without external SNARK libraries
 
-This is extremely rare, making it ideal for hackathons, forums, and demonstrating the power of Halo2 in zk-rollup applications.
+This is extremely rare, making it ideal for hackathons, forums, and demonstrating the power of Halo2.
 
 
