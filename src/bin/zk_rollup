@@ -9,13 +9,10 @@ use pasta_curves::{vesta::Base as Fq, pallas::Affine as EpAffine};
 use rand::thread_rng;
 use std::sync::{Arc, Mutex};
 use std::fs;
-use pasta_curves::group::ff::PrimeField;
 use anyhow::Result;
 use halo2_minimal::{AggregatorCircuit, MyFqCircuit};
-
-// 🔹 Adicionado para envio HTTP
 use reqwest::Client;
-
+use pasta_curves::group::ff::PrimeField;
 // --------------------
 // Custom Warp Error
 // --------------------
@@ -28,7 +25,7 @@ impl warp::reject::Reject for CustomError {}
 // --------------------
 #[derive(Deserialize)]
 struct AggregatorRequest {
-    sub_inputs: Vec<[u8; 32]>, // recebemos bytes, convertemos para Fq depois
+    sub_inputs: Vec<[u8; 32]>, // recebemos bytes, convertidos para Fq
 }
 
 #[derive(Serialize)]
@@ -42,12 +39,11 @@ struct ProofResponse {
 struct ProverState {
     pk: Arc<ProvingKey<EpAffine>>,
     vk: Arc<VerifyingKey<EpAffine>>,
-    proofs: Vec<Vec<u8>>,
-    count: usize,
+    buffer_sub_inputs: Vec<Vec<Fq>>, // armazena as subprovas antes de gerar agregada
 }
 
 // --------------------
-// Gera prova recursiva usando PK do agregador
+// Função que gera prova agregada real
 // --------------------
 fn generate_recursive_proof(
     pk: &ProvingKey<EpAffine>,
@@ -55,40 +51,35 @@ fn generate_recursive_proof(
     params: &Params<EpAffine>,
 ) -> Result<Vec<u8>> {
     println!("🧾 Criando prova agregada real...");
-
     let mut proof_bytes = Vec::new();
-    {
-        let mut transcript = Blake2bWrite::<_, _, Challenge255<EpAffine>>::init(&mut proof_bytes);
-        let mut rng = thread_rng();
-        println!("🧾 Gerando prova real com Halo2...");
-        create_proof(
-            params,
-            pk,
-            &[circuit],
-            &[&[]],  // instâncias externas vazias
-            &mut rng,
-            &mut transcript,
-        )?;
-    }
+    let mut transcript = Blake2bWrite::<_, _, Challenge255<EpAffine>>::init(&mut proof_bytes);
+    let mut rng = thread_rng();
+
+    create_proof(
+        params,
+        pk,
+        &[circuit],
+        &[&[]], // instâncias externas vazias
+        &mut rng,
+        &mut transcript,
+    )?;
 
     println!("✅ Prova agregada criada, tamanho: {} bytes", proof_bytes.len());
     Ok(proof_bytes)
 }
 
 // --------------------
-// Fluxo principal de agregação
+// Fluxo de agregação
 // --------------------
 async fn aggregate_flow(
     requests: Vec<AggregatorRequest>,
     state: Arc<Mutex<ProverState>>,
     k: u32,
 ) -> Result<Vec<u8>, warp::Rejection> {
-    println!("📥 Recebidas {} subprovas", requests.len());
-
     let params: Params<EpAffine> = Params::new(k);
 
-    // Converte os bytes recebidos para Fq
-    let sub_public_inputs: Vec<Vec<Fq>> = requests
+    // Converte bytes recebidos para Fq
+    let new_sub_inputs: Vec<Vec<Fq>> = requests
         .iter()
         .map(|req| {
             req.sub_inputs
@@ -98,55 +89,54 @@ async fn aggregate_flow(
         })
         .collect();
 
-    // Fake proofs temporárias (só para exemplo; aqui você pode substituir pelo real)
-    let sub_proofs: Vec<Vec<u8>> = requests.iter().map(|_| vec![0u8; 64]).collect();
-
-    let (pk_arc, vk_arc) = {
-        let guard = state.lock().unwrap();
-        (guard.pk.clone(), guard.vk.clone())
-    };
-
-    let aggregator_circuit = AggregatorCircuit {
-        sub_proofs,
-        sub_public_inputs: sub_public_inputs.clone(),
-        sub_vks: vec![(*vk_arc).clone(); sub_public_inputs.len()],
-        params: params.clone(),
-    };
-
-    let proof_bytes = generate_recursive_proof(&*pk_arc, aggregator_circuit, &params)
-        .map_err(|e| warp::reject::custom(CustomError(format!("{:?}", e))))?;
+    let mut maybe_proof: Option<Vec<u8>> = None;
 
     {
         let mut guard = state.lock().unwrap();
-        guard.proofs.push(proof_bytes.clone());
-        guard.count += 1;
+        // adiciona as subprovas ao buffer
+        guard.buffer_sub_inputs.extend(new_sub_inputs);
+
+        // só gera prova agregada quando houver 10 subprovas acumuladas
+        if guard.buffer_sub_inputs.len() >= 10 {
+            let sub_inputs_to_aggregate = guard.buffer_sub_inputs.drain(..10).collect::<Vec<_>>();
+            let (pk_arc, vk_arc) = (guard.pk.clone(), guard.vk.clone());
+
+            let sub_proofs = vec![vec![0u8; 64]; sub_inputs_to_aggregate.len()]; // fake proofs
+            let aggregator_circuit = AggregatorCircuit {
+                sub_proofs,
+                sub_public_inputs: sub_inputs_to_aggregate,
+                sub_vks: vec![(*vk_arc).clone(); 10],
+                params: params.clone(),
+            };
+
+            // gera a prova agregada
+            let proof_bytes = generate_recursive_proof(&*pk_arc, aggregator_circuit, &params)
+                .map_err(|e| warp::reject::custom(CustomError(format!("{:?}", e))))?;
+            maybe_proof = Some(proof_bytes.clone());
+
+            // salva em arquivo
+            fs::write("proof_recursive.bin", &proof_bytes)
+                .map_err(|e| warp::reject::custom(CustomError(format!("{:?}", e))))?;
+
+            // envia ao Semaphore
+            tokio::spawn({
+                let proof_to_send = proof_bytes.clone();
+                async move {
+                    let client = Client::new();
+                    let url = "http://127.0.0.1:3030/submit_proof";
+                    println!("🚀 Enviando prova agregada ao Semaphore: {}", url);
+                    match client.post(url).body(proof_to_send).send().await {
+                        Ok(res) => println!("✅ [BG] Semaphore respondeu com status: {}", res.status()),
+                        Err(e) => eprintln!("❌ Erro ao enviar ao Semaphore: {:?}", e),
+                    }
+                }
+            });
+        }
     }
 
-    fs::write("proof_recursive.bin", &proof_bytes)
-        .map_err(|e| warp::reject::custom(CustomError(format!("{:?}", e))))?;
-
-    println!("✅ Prova recursiva gerada e salva! Bytes: {}", proof_bytes.len());
-
-    // 🔹 Envia automaticamente ao servidor Semaphore (porta 3030)
-    tokio::spawn({
-        let proof_to_send = proof_bytes.clone();
-        async move {
-            let client = Client::new();
-            let url = "http://127.0.0.1:3030/submit_proof";
-            println!("🚀 Enviando prova recursiva ao Semaphore: {}", url);
-            match client
-                .post(url)
-                .body(proof_to_send)
-                .send()
-                .await
-            {
-                Ok(res) => println!("✅ [BG] Semaphore respondeu com status: {}", res.status()),
-                Err(e) => eprintln!("❌ Erro ao enviar ao Semaphore: {:?}", e),
-            }
-        }
-    });
-
-    Ok(proof_bytes)
+    maybe_proof.ok_or_else(|| warp::reject::custom(CustomError(
+        "Ainda não há 10 subprovas acumuladas, aguardando...".to_string(),
+    )))
 }
 
 // --------------------
@@ -163,16 +153,13 @@ async fn main() -> Result<()> {
         y_fq: Some(dummy_value),
     };
 
-    println!("⚙️ Gerando VK e PK do agregador...");
     let vk = keygen_vk(&params, &dummy_circuit)?;
     let pk = keygen_pk(&params, vk.clone(), &dummy_circuit)?;
-    println!("✅ PK e VK do agregador gerados com sucesso.");
 
     let state: Arc<Mutex<ProverState>> = Arc::new(Mutex::new(ProverState {
         pk: Arc::new(pk),
         vk: Arc::new(vk),
-        proofs: Vec::new(),
-        count: 0,
+        buffer_sub_inputs: Vec::new(),
     }));
 
     let state_filter = warp::any().map(move || Arc::clone(&state));
@@ -184,12 +171,8 @@ async fn main() -> Result<()> {
         .and_then(move |requests, state| {
             let k_copy = k;
             async move {
-                match aggregate_flow(requests, state, k_copy).await {
-                    Ok(proof_bytes) => Ok::<_, warp::Rejection>(warp::reply::json(&ProofResponse {
-                        proof: proof_bytes,
-                    })),
-                    Err(e) => Err(e),
-                }
+                aggregate_flow(requests, state, k_copy).await
+                    .map(|proof_bytes| warp::reply::json(&ProofResponse { proof: proof_bytes }))
             }
         });
 
@@ -200,10 +183,8 @@ async fn main() -> Result<()> {
         }))
     });
 
-    let routes = status_route.or(aggregate_route);
-
     println!("🚀 Servidor rodando em http://0.0.0.0:8082");
-    warp::serve(routes).run(([0, 0, 0, 0], 8082)).await;
+    warp::serve(status_route.or(aggregate_route)).run(([0, 0, 0, 0], 8082)).await;
 
     Ok(())
 }
