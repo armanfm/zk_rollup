@@ -89,7 +89,7 @@ Exemplo de Logs de Execução
 ✅ Aggregated proof created, size: 960 bytes
 ✅ Recursive proof generated and saved!
 
-Observações
+[Observações
 
 Funciona inteiramente em Halo2, sem necessidade de bibliotecas SNARK externas
 
@@ -120,3 +120,4 @@ Funciona com entradas públicas vazias
 Funciona totalmente em Rust/Halo2, sem bibliotecas SNARK externas
 
 Extremamente raro e avançado para fins educacionais e hackathons
+](https://chatgpt.com/c/68f911a1-b73c-8328-892f-23ef0c15a863#:~:text=bytes%0A%E2%9C%85%20Recursive%20proof%20generated%20and%20saved!-,Observations,Extremely%20rare%20and%20advanced%20for%20educational%20and%20hackathon,-Repository%3A%20https%3A//github.com/armanfm)
