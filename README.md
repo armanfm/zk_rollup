@@ -1,50 +1,56 @@
-# 🧾 zk-Rollup Recursive Proof with Halo2
+# 🧾 zk-Rollup Recursive Proof with Halo2 – Terra Dourada Module
 
 ## Objective
-Demonstrate the creation of **real recursive proofs** using Halo2, aggregating multiple subproofs, **without relying on external SNARK libraries**.  
+Demonstrate the creation of **real recursive proofs** using Halo2, aggregating multiple subproofs into a single proof. This module is part of the **Terra Dourada** project, a Web3 voting platform designed for **secure, auditable, and privacy-preserving elections**.
 
-This project implements a functional ZK-Rollup server using Halo2, serving as a **clean educational example** of recursive proof architecture, focusing on **application layer logic** and the aggregation flow of subproofs into a single final rollup.
+---
 
 ## Tools
-- Rust (nightly or recent stable)  
-- Halo2 crates: `halo2_proofs`, `pasta_curves`  
-- Auxiliary dependencies: `rand`, `serde`, `warp` (for server)  
+- **Rust** (nightly or recent stable)
+- **Halo2 crates**: `halo2_proofs`, `pasta_curves`
+- Auxiliary dependencies: `rand`, `serde`, `warp` (HTTP server)
+
+---
 
 ## Features
-- Generation of **aggregator PK and VK**  
-- Reception of **subproofs** via HTTP server  
-- **Aggregation of multiple subproofs**  
-- Creation of **real recursive proof**  
-- Support for **empty public inputs**  
+- Generate aggregator PK and VK
+- Receive subproofs via HTTP server
+- Aggregate multiple subproofs into a recursive proof
+- Support for empty public inputs
+- Proof verification via AggregatorCircuit simulation
+
+---
 
 ## Why This Is Rare
-- Most people only create **mock or simple proofs**.  
-- Real **recursive proofs** require the full pipeline to work: PK, VK, circuits, transcript, and instance handling.  
-- Your setup produces a **real, verifiable aggregated proof**, extremely rare in zk-rollup demos and hackathons.  
+- Most zk-rollup demos rely on **mock proofs** or external SNARK libraries.  
+- This project implements a **full recursive proof pipeline in Halo2**, from PK/VK generation to subproof aggregation.  
+- The result: a **real, verifiable recursive proof**, extremely rare in hackathons or educational demos.
 
-## ⚠️ Critical Security Disclaimer (Educational Caveat)
-This project is an educational and architectural model focusing on demonstrating ZK-Rollup aggregation using Halo2.  
+---
 
-**Important:** Verification of subproofs in `AggregatorCircuit` is done via simulation (mock). The `verify_proof_gadget` function calls the proof verification on the CPU (outside the circuit) and simply assigns the binary result (valid=1 or invalid=0) to the circuit.  
+## Security Disclaimer
+This is a **proof-of-concept for educational purposes**:
 
-This means:  
-- There is **no zero-knowledge guarantee** for subproof verification.  
-- A malicious prover could force a value of 1 (valid) even for a false proof, and the aggregator circuit would be satisfied.  
+- Subproof verification in `AggregatorCircuit` is simulated: the circuit assigns `1` if a proof is valid or `0` if invalid, **outside the circuit**.  
+- **No zero-knowledge guarantee for subproof verification.** A malicious prover could potentially force a false proof to pass.  
 
-For production:  
-- This function must be replaced by a **full in-circuit SNARK verification**, using ECC chips and pairing checks as implemented in libraries like `halo2-base` or `snark-verifier-sdk`.
+**For production use**: replace `verify_proof_gadget` with a full in-circuit SNARK verifier (e.g., `halo2-base` or `snark-verifier-sdk`), optimize proof size, and audit thoroughly.
+
+---
 
 ## Code Structure
 
 ### Server Initialization
-```rust
-// Example log
+```text
 🚀 Server running at http://0.0.0.0:8082
 Receives subproofs sent by clients.
 
-Proof Creation
-rust
-Copiar código
+
+Pipeline runs fully in Rust/Halo2 without external SNARK libraries
+
+This is extremely rare, making it ideal for hackathons, forums, and demonstrating the power of Halo2.
+
+Criação de Provas
 create_proof(
     params,
     pk,
@@ -53,34 +59,28 @@ create_proof(
     &mut rng,
     &mut transcript,
 )?;
-params: KZG parameters
+params: Parâmetros KZG
 
-pk: ProvingKey of the aggregator
+pk: ProvingKey do agregador
 
-circuit: circuit implementing Circuit<Fq>
+circuit: implementação de circuitoCircuit<Fq>
 
-&[&[]]: slice of empty public inputs
+[&[]]: embrulhado vazio publ
 
-transcript: Blake2b transcript to generate the proof
+transcript: Blake2b para geração de provas
 
-Notes on the fourth argument:
+Agregação de subprova
 
-[&[]] is a slice of slices, needed even if the circuit has no public inputs.
+Recebe 2 ou
 
-&[] alone will not work; it must be wrapped as [&[]].
+Valida cada subprova
 
-Subproof Aggregation
-Receives 2 or more subproofs
+Cria uma prova agregada final (~960 bytes na demonstração)
 
-Validates each subproof before aggregation
+Gera prova recursiva real
 
-Creates final aggregated proof (e.g., 960 bytes)
+Exemplo de Logs de Execução
 
-Generates real recursive proof
-
-Execution Logs
-sql
-Copiar código
 ⚙️ Generating aggregator VK and PK...
 ✅ PK and VK generated.
 📥 2 subproofs received
@@ -88,44 +88,35 @@ Copiar código
 ✅ All subproofs aggregated and validated successfully!
 ✅ Aggregated proof created, size: 960 bytes
 ✅ Recursive proof generated and saved!
-Observations
-Current code is a proof-of-concept, running in dev profile
 
-Works entirely in Halo2, no external SNARK library needed
+Observações
 
-Even though the code is simple, it achieves a very powerful and rare result
+Funciona inteiramente em Halo2, sem necessidade de bibliotecas SNARK externas
 
-Safe for testing and hackathons, but not ready for industrial use without optimization, audit, and release builds
+O tamanho da prova é compacto
 
-Production Considerations
-Build in release mode (cargo build --release) for performance
+Ideal para hackathons, fóruns e demonstrações
 
-Handle more subproofs and concurrency
+Focado na clareza educacional e arquitetônica , não no conhecimento zero de nível de produção
 
-Audit the code before using for financial or on-chain rollups
+Próximos passos
 
-Optimize proof size if scaling to many subproofs
+Teste com mais subprovas
 
-Next Steps
-Test with more subproofs
+Otimize o tamanho da prova e a simultaneidade
 
-Optimize proof size
+Preparar pipeline para rollups on-chain ou verificação off-chain
 
-Prepare pipeline for on-chain rollups or off-chain verification
+Documentar e mostrar o pipeline para a comunidade
 
-Document and showcase the pipeline for the community
+Resumo
 
-Summary
-You now have a real, working recursive zk-rollup proof pipeline in Halo2:
+Este módulo fornece um pipeline de prova zk-rollup recursivo funcional no Halo2 para o projeto Terra Dourada:
 
-Subproofs can be aggregated and validated
+As subprovas podem ser agregadas e validadas recursivamente
 
-Proof recursiveness works with empty public inputs
+Funciona com entradas públicas vazias
 
-Proof size is compact (960 bytes in the demo)
+Funciona totalmente em Rust/Halo2, sem bibliotecas SNARK externas
 
-Pipeline runs fully in Rust/Halo2 without external SNARK libraries
-
-This is extremely rare, making it ideal for hackathons, forums, and demonstrating the power of Halo2.
-
-
+Extremamente raro e avançado para fins educacionais e hackathons
