@@ -89,35 +89,34 @@ Exemplo de Logs de Execução
 ✅ Aggregated proof created, size: 960 bytes
 ✅ Recursive proof generated and saved!
 
-[Observações
+Observations
 
-Funciona inteiramente em Halo2, sem necessidade de bibliotecas SNARK externas
+Runs entirely in Halo2, no external SNARK libraries required
 
-O tamanho da prova é compacto
+Proof size is compact
 
-Ideal para hackathons, fóruns e demonstrações
+Ideal for hackathons, forums, and demonstrations
 
-Focado na clareza educacional e arquitetônica , não no conhecimento zero de nível de produção
+Focused on educational and architectural clarity, not production-grade zero-knowledge
 
-Próximos passos
+Next Steps
 
-Teste com mais subprovas
+Test with more subproofs
 
-Otimize o tamanho da prova e a simultaneidade
+Optimize proof size and concurrency
 
-Preparar pipeline para rollups on-chain ou verificação off-chain
+Prepare pipeline for on-chain rollups or off-chain verification
 
-Documentar e mostrar o pipeline para a comunidade
+Document and showcase the pipeline to the community
 
-Resumo
+Summary
 
-Este módulo fornece um pipeline de prova zk-rollup recursivo funcional no Halo2 para o projeto Terra Dourada:
+This module provides a working recursive zk-rollup proof pipeline in Halo2 for the Terra Dourada project:
 
-As subprovas podem ser agregadas e validadas recursivamente
+Subproofs can be aggregated and validated recursively
 
-Funciona com entradas públicas vazias
+Works with empty public inputs
 
-Funciona totalmente em Rust/Halo2, sem bibliotecas SNARK externas
+Runs fully in Rust/Halo2, without external SNARK libraries
 
-Extremamente raro e avançado para fins educacionais e hackathons
-](https://chatgpt.com/c/68f911a1-b73c-8328-892f-23ef0c15a863#:~:text=bytes%0A%E2%9C%85%20Recursive%20proof%20generated%20and%20saved!-,Observations,Extremely%20rare%20and%20advanced%20for%20educational%20and%20hackathon,-Repository%3A%20https%3A//github.com/armanfm)
+Extremely rare and advanced for educational and hackathon
