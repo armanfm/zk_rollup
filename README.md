@@ -89,34 +89,22 @@ Exemplo de Logs de Execução
 ✅ Aggregated proof created, size: 960 bytes
 ✅ Recursive proof generated and saved!
 
-Observations
+## Observations
+- Runs entirely in Halo2, **no external SNARK libraries required**  
+- Proof size is compact  
+- Ideal for **hackathons, forums, and demonstrations**  
+- Focused on **educational and architectural clarity**, not production-grade zero-knowledge  
 
-Runs entirely in Halo2, no external SNARK libraries required
+## Next Steps
+- Test with more subproofs  
+- Optimize proof size and concurrency  
+- Prepare pipeline for **on-chain rollups or off-chain verification**  
+- Document and showcase the pipeline to the community  
 
-Proof size is compact
+## Summary
+This module provides a **working recursive zk-rollup proof pipeline in Halo2** for the Terra Dourada project:
 
-Ideal for hackathons, forums, and demonstrations
-
-Focused on educational and architectural clarity, not production-grade zero-knowledge
-
-Next Steps
-
-Test with more subproofs
-
-Optimize proof size and concurrency
-
-Prepare pipeline for on-chain rollups or off-chain verification
-
-Document and showcase the pipeline to the community
-
-Summary
-
-This module provides a working recursive zk-rollup proof pipeline in Halo2 for the Terra Dourada project:
-
-Subproofs can be aggregated and validated recursively
-
-Works with empty public inputs
-
-Runs fully in Rust/Halo2, without external SNARK libraries
-
-Extremely rare and advanced for educational and hackathon
+- Subproofs can be **aggregated and validated recursively**  
+- Works with **empty public inputs**  
+- Runs fully in **Rust/Halo2**, without external SNARK libraries  
+- Extremely **rare and advanced** for educational and hackathon purposes
