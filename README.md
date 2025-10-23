@@ -112,4 +112,7 @@ This is a **proof-of-concept** for educational purposes:
 ### ⚙️ Notes
 - Fully implemented in Rust/Halo2  
 - Ideal for hackathons, educational demos, and advanced prototypes  
-- Demonstrates **reliability, privacy, and security** of recursive proofs  
+- Demonstrates **reliability, privacy, and security** of recursive proofs
+
+
+Yes, we use $1$ and $0$ as validity witnesses injected into the circuit. However, the true power lies in the multiplication cascade implemented within the AggregatorCircuit.This cascade mathematically constructs a protective integrity gate: the Prover must supply a final proof that satisfies the constraint $\mathbf{P_{final} = 1}$.If any internal sub-proof fails verification (and the runtime provides a $0$ witness), the multiplication cascade collapses to $0$. Consequently, the circuit fails the final constraint.This design choice enables high-performance aggregation without sacrificing batch integrity or the security assurance of the final proof.
