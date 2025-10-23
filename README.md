@@ -1,199 +1,135 @@
- # 🌟 Recursive Proofs with Halo2: Terra Dourada zk-Rollup
+🌟 Recursive Proofs with Halo2: Terra Dourada zk-Rollup
+🎯 Executive Summary
 
-## 🎯 Executive Summary
-This module implements **real recursive proofs** using Halo2 and Pasta Curves (Pallas/Vesta), aggregating multiple subproofs into a single verifiable proof. Unlike theoretical demos or mock proofs, this pipeline is **100% functional in Rust/Halo2**, modular, auditable, and ready for hackathons or educational demonstrations.
+This module implements real recursive proofs using Halo2 and Pasta Curves (Pallas/Vesta), aggregating multiple subproofs into a single verifiable proof. Unlike theoretical demos or mock proofs, this pipeline is 100% functional, modular, auditable, and ready for hackathons or educational demonstrations.
 
-| Feature                | Business Advantage                          | Technical Insight |
-|------------------------|---------------------------------------------|-----------------|
-| ✅ Halo2 Purity         | Maximum security, no external dependencies | `AggregatorCircuit` implemented directly |
-| ⚡ Scalability          | Efficient aggregation of thousands of subproofs | Batch processing (e.g., 10 subproofs) |
-| 🏗️ Modular Architecture | Easy maintenance, testing, and expansion  | Clear separation: Prover → Aggregator → Verifier |
-| 🔐 Absolute Privacy     | Zero-Knowledge ensured                      | Empty Public Instances (`&[&[]]`) in `create_proof` |
+Feature	Business Advantage	Technical Insight
+✅ Halo2 Purity	Maximum security, no external dependencies	AggregatorCircuit implemented directly
+⚡ Scalability	Efficient aggregation of thousands of subproofs	Batch processing (e.g., 10 subproofs)
+🏗️ Modular Architecture	Easy maintenance, testing, and expansion	Clear separation: Prover → Aggregator → Verifier
+🔐 Absolute Privacy	Zero-Knowledge ensured	Empty Public Instances (&[&[]]) in proof generation
+Objective
 
----
+Demonstrate the creation of real recursive proofs using Halo2, aggregating multiple subproofs into a single proof. This module is part of the Terra Dourada project, a Web3 voting platform designed for secure, auditable, and privacy-preserving elections.
 
-## Objective
-Demonstrate the creation of **real recursive proofs** using Halo2, aggregating multiple subproofs into a single proof. This module is part of the **Terra Dourada** project, a Web3 voting platform designed for secure, auditable, and privacy-preserving elections.
+Tools
 
----
+Rust (nightly or recent stable)
 
-## Tools
-- **Rust** (nightly or recent stable)  
-- **Halo2 crates:** `halo2_proofs`, `pasta_curves`  
-- **Auxiliary dependencies:** `rand`, `serde`, `warp` (HTTP server)  
+Halo2 crates: halo2_proofs, pasta_curves
 
----
+Auxiliary dependencies: rand, serde, warp (HTTP server)
 
-## Features
-- Generate aggregator PK and VK  
-- Receive subproofs via HTTP server  
-- Aggregate multiple subproofs into a recursive proof  
-- Support for empty public inputs  
-- Proof verification via `AggregatorCircuit` simulation  
+Features
 
----
+Generate Aggregator PK and VK
 
-## Why This Is Rare
-Most zk-rollup demos rely on mock proofs or external SNARK libraries.  
-This project implements a **full recursive proof pipeline in Halo2**, from PK/VK generation to subproof aggregation.  
-**Result:** a real, verifiable recursive proof, extremely rare in hackathons or educational demos.
+Receive subproofs via HTTP server
 
----
+Aggregate multiple subproofs into a recursive proof
 
-## Security Disclaimer
-This is a **proof-of-concept** for educational purposes:  
-- Subproof verification in `AggregatorCircuit` is simulated: the circuit assigns `1` if a proof is valid or `0` if invalid, **outside the circuit**.  
-- **No zero-knowledge guarantee** for subproof verification. A malicious prover could potentially force a false proof to pass.  
-- **For production use:** replace `verify_proof_gadget` with a full in-circuit SNARK verifier (e.g., `halo2-base` or `snark-verifier-sdk`), optimize proof size, and audit thoroughly.
+Support for empty public inputs
 
----
+Proof verification via AggregatorCircuit simulation
 
-## 📚 Technical Background
+Why This Is Rare
 
-### 1. Three-Layer Architecture
-| Layer       | Function                                                      | Primary Field              |
-|------------|---------------------------------------------------------------|----------------------------|
-| Prover     | Generates individual proofs and converts public inputs to Fq | `Fq` (Vesta Base Field)    |
-| Aggregator | Receives subproofs (`Fq`), accumulates, generates recursive proof | `Fq` (Inputs) and `Fr` (Constraints) |
-| Verifier   | Validates the final aggregated proof                           | `EpAffine` (Keys/Params)  |
+Most zk-rollup demos rely on mock proofs or external SNARK libraries.
+This project implements a full recursive proof pipeline in Halo2, from PK/VK generation to subproof aggregation.
+Result: a real, verifiable recursive proof, extremely rare in hackathons or educational demos.
 
-### 2. The Secret of Recursivity
-- **`EpAffine` (Pallas affine):** Key structure (`pk`/`vk`) and KZG parameters.  
-- **`Fq` (Vesta Base Field):** Recursive proof field. Subproofs must be converted to `Fq` before aggregation.  
-- **`Fr` (Pallas Scalar Field):** Used in `AggregatorCircuit` for constraints and boolean logic (1 or 0).  
+Security Disclaimer
 
-### 3. Fundamental Data Structures
+This is a proof-of-concept for educational purposes:
 
-```rust
-#[derive(Debug)]
-struct CustomError(String);
-impl warp::reject::Reject for CustomError {}
+Subproof verification in AggregatorCircuit is simulated (1 if valid, 0 if invalid, outside the circuit).
 
-#[derive(Deserialize)]
-struct AggregatorRequest {
-    sub_inputs: Vec<[u8; 32]>,  // Serialized Fq elements
-}
+No zero-knowledge guarantee for subproof verification. Malicious provers could force a false proof to pass.
 
-#[derive(Serialize)] 
-struct ProofResponse {
-    proof: Vec<u8>,  // Final recursive proof
-}
-CustomError: safe request rejection.
+Production recommendation: replace simulated verification with a full in-circuit SNARK verifier, optimize proof size, and audit thoroughly.
 
-[u8; 32]: represents 256-bit Fq elements, avoiding encoding issues.
+📚 Technical Background
+1. Three-Layer Architecture
+Layer	Function	Primary Field
+Prover	Generates individual proofs and converts public inputs to Fq	Fq (Vesta Base Field)
+Aggregator	Receives subproofs (Fq), accumulates, generates recursive proof	Fq (Inputs) and Fr (Constraints)
+Verifier	Validates the final aggregated proof	EpAffine (Keys/Params)
+2. The Secret of Recursivity
 
-4. Aggregation Pipeline (aggregate_flow)
-Bytes to Fq conversion:
+EpAffine (Pallas affine): Key structure (pk/vk) and KZG parameters
 
-rust
-Copiar código
-let new_sub_inputs: Vec<Vec<Fq>> = requests
-    .iter()
-    .map(|req| req.sub_inputs.iter()
-         .map(|arr| Fq::from_repr_vartime(*arr).expect("invalid bytes"))
-         .collect())
-    .collect();
-Buffer accumulation and minimum batch:
+Fq (Vesta Base Field): Recursive proof field; subproofs must be converted before aggregation
 
-rust
-Copiar código
-if guard.buffer_sub_inputs.len() >= 10 {
-    let sub_inputs_to_aggregate = guard.buffer_sub_inputs.drain(..10).collect();
-}
-AggregatorCircuit setup:
+Fr (Pallas Scalar Field): Used in AggregatorCircuit for constraints and boolean logic
 
-rust
-Copiar código
-let aggregator_circuit = AggregatorCircuit {
-    sub_proofs,
-    sub_public_inputs: sub_inputs_to_aggregate,
-    sub_vks: vec![(*vk_arc).clone(); 10],
-    params: params.clone(),
-};
-Recursive proof generation:
+3. Fundamental Data Structures
 
-rust
-Copiar código
-let proof_bytes = generate_recursive_proof(&*pk_arc, aggregator_circuit, &params)?;
-Transcript (Fiat-Shamir): Blake2bWrite manages the proof flow.
+CustomError: safe request rejection in HTTP server
 
-Empty public instances (&[&[]]): preserves absolute privacy.
+[u8; 32]: represents 256-bit Fq elements, avoiding encoding issues
 
-5. Aggregator Circuit (AggregatorCircuit)
+AggregatorRequest / ProofResponse: define input/output of aggregation pipeline
+
+4. Aggregation Pipeline
+
+Bytes → Fq conversion: Converts subproofs from API to field elements
+
+Buffer accumulation & minimum batch: Generates recursive proof every 10 subproofs
+
+AggregatorCircuit setup: Configures inputs, subproofs, and verification keys
+
+Recursive proof generation: Produces final proof using Halo2 pipeline
+
+Transcript (Fiat-Shamir): Secure, non-interactive proof flow
+
+Empty public instances: Maintains absolute privacy
+
+5. Aggregator Circuit
 Gadget/Column	Logical Function
-verify_proof_gadget	Verifies each subproof, returns Fr::one() or Fr::zero()
-all_valid (Advice Col.)	Multiplies results, 1 if all subproofs valid
-constrain_equal	Ensures all_valid == Fr::one(), guaranteeing integrity
+verify_proof_gadget	Verifies each subproof, outputs 1 if valid, 0 if invalid
+all_valid (Advice Column)	Multiplies results, 1 if all subproofs valid
+constrain_equal	Ensures all_valid == 1, guaranteeing integrity
+Server & Execution
 
-Code Structure
-Server Initialization
-🚀 Server running at http://0.0.0.0:8082
+Server running: Receives subproofs from clients, pipeline runs fully in Rust/Halo2
 
-Receives subproofs sent by clients
+Proof creation: Aggregates multiple subproofs into a single, verifiable recursive proof (~960 bytes in demo)
 
-Note: Pipeline runs fully in Rust/Halo2 without external SNARK libraries.
-Ideal for hackathons, forums, and demonstrating Halo2 power.
+Privacy preserved: Empty public inputs prevent exposure of private data
 
-Proof Creation
-rust
-Copiar código
-create_proof(
-    params,
-    pk,
-    &[circuit],
-    &[&[]], // empty public inputs
-    &mut rng,
-    &mut transcript,
-)?;
-params: KZG parameters
+Ideal for hackathons, forums, and educational demos
 
-pk: Aggregator ProvingKey
+Example Execution Flow
 
-circuit: Circuit<Fq> implementation
+PK and VK generated for aggregator
 
-[&[]]: empty public instances placeholder
+Subproofs received via HTTP
 
-transcript: Blake2b for proof generation
+Aggregator validates each subproof
 
-Important: [&[]] allows proof creation without exposing public inputs, maintaining privacy.
+Recursive proof created, validated, and saved
 
-Subproof Aggregation
-Receives 2 or more subproofs
+Final proof size: ~960 bytes
 
-Validates each subproof (verify_proof_gadget)
-
-Creates final aggregated proof (~960 bytes in demo)
-
-Produces real recursive proof
-
-Example Execution Logs
-sql
-Copiar código
-⚙️ Generating aggregator VK and PK...
-✅ PK and VK generated.
-📥 2 subproofs received
-🧾 Creating real aggregated proof...
-✅ All subproofs aggregated and validated successfully!
-✅ Aggregated proof created, size: 960 bytes
-✅ Recursive proof generated and saved!
 🏆 Commercial Applications
 Application	Benefit
 Scalable zk-Rollups	Efficient aggregation of thousands of transactions
 Voting Systems	Privacy without compromising verifiability
 Oracles & Bridges	Compact proofs for complex or cross-chain data
-
 Competitive Advantages
+
 Technical Purity: 100% Halo2, no forks
 
-Efficiency: batch processing, optimized conversion
+Efficiency: Batch processing, optimized conversion
 
 Security: CustomError, Fiat-Shamir, empty instances
 
-Detailed Documentation: Rust code linked to Halo2 constraints
+Documentation: Rust code fully linked to Halo2 constraints
 
 ⚙️ Notes
-Fully implemented in Rust/Halo2, no external SNARK libraries
+
+Fully implemented in Rust/Halo2
 
 Ideal for hackathons, educational demos, and advanced prototypes
 
-Real execution demonstrates reliability: final proof ~960 bytes
+Demonstrates reliability, privacy, and security of recursive proofs
