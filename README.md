@@ -1,4 +1,6 @@
-ficou melçhor q esse meu readme aq? ou da p ter o melhor dos dois mundosa?Objective
+
+
+Objective
 Demonstrate the creation of real recursive proofs using Halo2, aggregating multiple subproofs into a single proof. This module is part of the Terra Dourada project, a Web3 voting platform designed for secure, auditable, and privacy-preserving elections.
 
 Tools
