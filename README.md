@@ -76,14 +76,6 @@ This is a **proof-of-concept** for educational purposes:
 - **Transcript (Fiat-Shamir):** Secure, non-interactive proof flow  
 - **Empty public instances:** Maintains absolute privacy  
 
-### 5. Aggregator Circuit
-| Gadget/Column | Logical Function |
-|---------------|-----------------|
-| verify_proof_gadget | Verifies each subproof, outputs 1 if valid, 0 if invalid |
-| all_valid (Advice Column) | Multiplies results, 1 if all subproofs valid |
-| constrain_equal | Ensures all_valid == 1, guaranteeing integrity |
-
----
 
 ## Server & Execution
 - **Server running:** Receives subproofs from clients, pipeline runs fully in Rust/Halo2  
