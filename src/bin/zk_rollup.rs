@@ -183,7 +183,7 @@ async fn main() -> Result<()> {
         }))
     });
 
-    println!("🚀 Servidor rodando em http://0.0.0.0:8082");
+    println!("🚀 ZK_ROLLUP rodando em http://0.0.0.0:8082");
     warp::serve(status_route.or(aggregate_route)).run(([0, 0, 0, 0], 8082)).await;
 
     Ok(())
